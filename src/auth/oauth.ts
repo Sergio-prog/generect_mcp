@@ -2,14 +2,52 @@ import { Router, Request, Response } from 'express';
 import { renderLoginPage, renderErrorPage } from './login-ui.js';
 import { 
   getClient, 
+  getClientByMetadataUrl,
   registerClient, 
   validateRedirectUri, 
   verifyCodeChallenge, 
   createAuthCode, 
   consumeAuthCode,
-  generateUserId 
+  generateUserId,
+  OAuthClient 
 } from './storage.js';
 import { generateAccessToken } from './jwt.js';
+
+interface ClientMetadataDocument {
+  client_name?: string;
+  redirect_uris: string[];
+  logo_uri?: string;
+  client_uri?: string;
+  grant_types?: string[];
+  response_types?: string[];
+}
+
+async function fetchClientMetadata(metadataUrl: string): Promise<ClientMetadataDocument | null> {
+  try {
+    const res = await fetch(metadataUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+    
+    if (!res.ok) {
+      console.error(`[oauth] Failed to fetch client metadata from ${metadataUrl}: ${res.status}`);
+      return null;
+    }
+    
+    const metadata = await res.json() as ClientMetadataDocument;
+    
+    if (!metadata.redirect_uris || !Array.isArray(metadata.redirect_uris) || metadata.redirect_uris.length === 0) {
+      console.error(`[oauth] Client metadata missing redirect_uris`);
+      return null;
+    }
+    
+    return metadata;
+  } catch (error) {
+    console.error(`[oauth] Error fetching client metadata:`, error);
+    return null;
+  }
+}
 
 const GENERECT_API_BASE = process.env.GENERECT_API_BASE || 'https://api.generect.com';
 
@@ -37,6 +75,48 @@ async function validateApiToken(token: string): Promise<{ valid: boolean; error?
   } catch (error) {
     return { valid: false, error: 'Failed to validate token. Please try again.' };
   }
+}
+
+async function resolveClient(clientId: string): Promise<OAuthClient | null> {
+  let client = await getClient(clientId);
+  if (client) {
+    return client;
+  }
+  
+  if (clientId.startsWith('https://') || clientId.startsWith('http://')) {
+    client = getClientByMetadataUrl(clientId);
+    if (client) {
+      return client;
+    }
+    
+    const metadata = await fetchClientMetadata(clientId);
+    if (!metadata) {
+      return null;
+    }
+    
+    const normalizedGrantTypes = metadata.grant_types 
+      ? (Array.isArray(metadata.grant_types) ? metadata.grant_types : [metadata.grant_types])
+      : ['authorization_code'];
+    
+    const normalizedResponseTypes = metadata.response_types
+      ? (Array.isArray(metadata.response_types) ? metadata.response_types : [metadata.response_types])
+      : ['code'];
+    
+    client = registerClient({
+      client_name: metadata.client_name,
+      redirect_uris: metadata.redirect_uris,
+      logo_uri: metadata.logo_uri,
+      client_uri: metadata.client_uri,
+      grant_types: normalizedGrantTypes,
+      response_types: normalizedResponseTypes,
+      metadata_url: clientId,
+    });
+    
+    console.log(`[oauth] Auto-registered client from metadata URL: ${clientId}`);
+    return client;
+  }
+  
+  return null;
 }
 
 export const oauthRouter = Router();
@@ -75,7 +155,7 @@ async function handleAuthorizeGet(req: Request, res: Response) {
     return;
   }
   
-  const client = await getClient(clientId);
+  const client = await resolveClient(clientId);
   if (!client) {
     res.status(400).send(renderErrorPage({ error: 'invalid_client', errorDescription: 'Unknown client_id. Please register your client first.' }));
     return;
@@ -118,7 +198,7 @@ async function handleAuthorizePost(req: Request, res: Response) {
     return;
   }
   
-  const client = await getClient(clientId);
+  const client = await resolveClient(clientId);
   if (!client) {
     res.status(400).send(renderErrorPage({ error: 'invalid_client', errorDescription: 'Unknown client_id' }));
     return;
@@ -206,7 +286,7 @@ async function handleToken(req: Request, res: Response) {
     return;
   }
   
-  const client = await getClient(clientId);
+  const client = await resolveClient(clientId);
   if (!client) {
     res.status(400).json({
       error: 'invalid_client',

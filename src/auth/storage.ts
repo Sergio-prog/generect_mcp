@@ -8,6 +8,7 @@ export interface OAuthClient {
   responseTypes: string[];
   logoUri?: string;
   clientUri?: string;
+  metadataUrl?: string;
   createdAt: number;
 }
 
@@ -42,8 +43,9 @@ export function registerClient(data: {
   client_uri?: string;
   grant_types?: string[];
   response_types?: string[];
+  metadata_url?: string;
 }): OAuthClient {
-  const clientId = generateClientId();
+  const clientId = data.metadata_url || generateClientId();
   const client: OAuthClient = {
     clientId,
     clientName: data.client_name || 'MCP Client',
@@ -52,6 +54,7 @@ export function registerClient(data: {
     responseTypes: data.response_types || ['code'],
     logoUri: data.logo_uri,
     clientUri: data.client_uri,
+    metadataUrl: data.metadata_url,
     createdAt: Date.now(),
   };
   
@@ -61,6 +64,15 @@ export function registerClient(data: {
 
 export function getClient(clientId: string): OAuthClient | undefined {
   return clients.get(clientId);
+}
+
+export function getClientByMetadataUrl(metadataUrl: string): OAuthClient | undefined {
+  for (const client of clients.values()) {
+    if (client.metadataUrl === metadataUrl) {
+      return client;
+    }
+  }
+  return undefined;
 }
 
 export function generateCodeChallenge(verifier: string, method: 'S256' | 'plain' = 'S256'): string {
