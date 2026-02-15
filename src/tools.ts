@@ -50,10 +50,18 @@ async function fetchWithTimeout(
 
 export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: string, apiKey: string) {
   function resolveAuthHeader(extra: any): string {
+    if (extra?.apiToken) {
+      return extra.apiToken.startsWith('Token ') ? extra.apiToken : `Token ${extra.apiToken}`;
+    }
+    
     const header = extra?.requestInfo?.headers?.authorization as string | undefined;
     if (header && header.trim()) {
+      if (header.startsWith('Bearer ')) {
+        return header;
+      }
       return header.startsWith('Token ') ? header : `Token ${header}`;
     }
+    
     const fallback = apiKey || '';
     if (!fallback) {
       throw new Error('Authorization header is required');
@@ -63,7 +71,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
   const defaultTimeoutMs = Number(process.env.GENERECT_TIMEOUT_MS || '120000');
   const debug = process.env.MCP_DEBUG === '1' || process.env.MCP_DEBUG === 'true';
 
-  // 1. Пошук лідів по ICP (без компаній)
+  // 1. Search leads by ICP
   server.tool(
     'search_leads',
     'Search for leads by ICP filters',
@@ -91,7 +99,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
         }, Number(args?.timeout_ms ?? defaultTimeoutMs));
         const text = await res.text();
         const data = JSON.parse(text);
-        const compact = args?.compact !== false; // default true
+        const compact = args?.compact !== false;
         const maxItems = Number(args?.max_items ?? args?.limit ?? 10);
         if (compact && data) {
           const leads = (data.leads ?? data.results ?? data.items ?? []) as any[];
@@ -108,7 +116,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
     }
   );
 
-  // 2. Пошук компаній (для лідів)
+  // 2. Search companies
   server.tool(
     'search_companies',
     'Search for companies by ICP filters',
@@ -134,7 +142,6 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
         }, Number(args?.timeout_ms ?? defaultTimeoutMs));
         const text = await res.text();
         let data = JSON.parse(text);
-        // Fallback: derive companies from leads by keywords when API returns nothing
         const companiesEmpty = !data || !Array.isArray(data.companies) || data.companies.length === 0;
         const shouldFallback = companiesEmpty && Array.isArray(args?.keywords) && args.keywords.length > 0 && args?.fallback_from_leads !== false;
         if (shouldFallback) {
@@ -158,10 +165,9 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
             const derived = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, occurrences_in_leads: count }));
             data = { amount: derived.length, companies: derived };
           } catch {
-            // ignore fallback parse errors
           }
         }
-        const compact = args?.compact !== false; // default true
+        const compact = args?.compact !== false;
         const maxItems = Number(args?.max_items ?? 10);
         if (compact && data) {
           const companies = (data.companies ?? data.results ?? data.items ?? []) as any[];
@@ -178,7 +184,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
     }
   );
 
-  // 3. Email finder по лідах  
+  // 3. Email finder
   server.tool(
     'generate_email',
     'Generate email by first/last name and domain via Generect Email Generator',
@@ -210,7 +216,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
     }
   );
 
-  // 4. Апдейт по лінкединах
+  // 4. Get lead by LinkedIn URL
   server.tool(
     'get_lead_by_url',
     'Get Lead by LinkedIn URL',
