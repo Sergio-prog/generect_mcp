@@ -59,10 +59,19 @@ app.post('/mcp', requireBearerAuth, async (req: AuthenticatedRequest, res: Respo
   let transport = sessionId ? transports.get(sessionId) : undefined;
 
   if (!transport && isInitializeRequest(req.body)) {
-    transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId) => {
+        transports.set(sessionId, transport);
+      },
+    });
+    transport.onclose = () => {
+      if (transport.sessionId) {
+        transports.delete(transport.sessionId);
+      }
+    };
     const server = createMcpServer();
     await server.connect(transport);
-    if (transport.sessionId) transports.set(transport.sessionId, transport);
   }
 
   if (!transport) {
