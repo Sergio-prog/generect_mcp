@@ -40,7 +40,7 @@ app.get('/.well-known/jwks.json', handleJwks);
 
 app.use('/oauth', oauthRouter);
 
-const transports = new Map<string, any>();
+const transports = new Map<string, StreamableHTTPServerTransport>();
 
 function createMcpServer() {
   const server = new McpServer({ name: 'generect-api', version: '1.0.0' });
@@ -62,12 +62,12 @@ app.post('/mcp', requireBearerAuth, async (req: AuthenticatedRequest, res: Respo
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId) => {
-        transports.set(sessionId, transport);
+        transports.set(sessionId, transport!);
       },
     });
     transport.onclose = () => {
-      if (transport.sessionId) {
-        transports.delete(transport.sessionId);
+      if (transport!.sessionId) {
+        transports.delete(transport!.sessionId);
       }
     };
     const server = createMcpServer();
@@ -78,8 +78,7 @@ app.post('/mcp', requireBearerAuth, async (req: AuthenticatedRequest, res: Respo
     res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: No session' }, id: null });
     return;
   }
-  
-  (req as any).apiToken = req.apiToken;
+
   await transport.handleRequest(req as any, res as any, req.body);
 });
 

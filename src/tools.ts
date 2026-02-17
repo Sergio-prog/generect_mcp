@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { verifyAccessToken, extractApiToken } from './auth/jwt.js';
 
 type Fetcher = typeof fetch;
 
@@ -49,24 +50,38 @@ async function fetchWithTimeout(
 }
 
 export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: string, apiKey: string) {
-  function resolveAuthHeader(extra: any): string {
-    if (extra?.apiToken) {
-      return extra.apiToken.startsWith('Token ') ? extra.apiToken : `Token ${extra.apiToken}`;
+  async function resolveAuthHeader(extra: any): Promise<string> {
+    const header = extra?.requestInfo?.headers?.authorization as string | undefined;
+    
+    if (!header || !header.trim()) {
+      const fallback = apiKey || '';
+      if (!fallback) {
+        throw new Error('Authorization header is required');
+      }
+      return fallback.startsWith('Token ') ? fallback : `Token ${fallback}`;
     }
     
-    const header = extra?.requestInfo?.headers?.authorization as string | undefined;
-    if (header && header.trim()) {
-      if (header.startsWith('Bearer ')) {
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      if (header.startsWith('Token ')) {
         return header;
       }
-      return header.startsWith('Token ') ? header : `Token ${header}`;
+      return `Token ${header}`;
     }
     
-    const fallback = apiKey || '';
-    if (!fallback) {
-      throw new Error('Authorization header is required');
+    const token = match[1];
+    
+    if (token.startsWith('Token ')) {
+      return token;
     }
-    return fallback.startsWith('Token ') ? fallback : `Token ${fallback}`;
+    
+    const payload = await verifyAccessToken(token);
+    if (!payload) {
+      throw new Error('Invalid or expired access token');
+    }
+    
+    const apiToken = extractApiToken(payload);
+    return apiToken;
   }
   const defaultTimeoutMs = Number(process.env.GENERECT_TIMEOUT_MS || '120000');
   const debug = process.env.MCP_DEBUG === '1' || process.env.MCP_DEBUG === 'true';
@@ -88,10 +103,10 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
       compact: z.boolean().describe('Return compact summary instead of full JSON').optional(),
       timeout_ms: z.number().describe('Request timeout in milliseconds').optional(),
     },
-    async (args: any, extra: any) => {
+    async (args, extra) => {
       if (debug) console.error('[mcp] search_leads args:', JSON.stringify(args));
       try {
-        const Authorization = resolveAuthHeader(extra);
+        const Authorization = await resolveAuthHeader(extra);
         const res = await fetchWithTimeout(fetcher, `${apiBase}/api/linkedin/leads/by_icp/`, {
           method: 'POST',
           headers: { Authorization, 'Content-Type': 'application/json' },
@@ -131,10 +146,10 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
       fallback_from_leads: z.boolean().describe('If no companies, derive from leads by keywords').optional(),
       timeout_ms: z.number().describe('Request timeout in milliseconds').optional(),
     },
-    async (args: any, extra: any) => {
+    async (args, extra) => {
       if (debug) console.error('[mcp] search_companies args:', JSON.stringify(args));
       try {
-        const Authorization = resolveAuthHeader(extra);
+        const Authorization = await resolveAuthHeader(extra);
         const res = await fetchWithTimeout(fetcher, `${apiBase}/api/linkedin/companies/by_icp/`, {
           method: 'POST',
           headers: { Authorization, 'Content-Type': 'application/json' },
@@ -194,10 +209,10 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
       domain: z.string().describe('Company domain without protocol (e.g., generect.com)'),
       timeout_ms: z.number().describe('Request timeout in milliseconds').optional(),
     },
-    async (args: any, extra: any) => {
+    async (args, extra) => {
       if (debug) console.error('[mcp] generate_email args:', JSON.stringify(args));
       try {
-        const Authorization = resolveAuthHeader(extra);
+        const Authorization = await resolveAuthHeader(extra);
         const candidate = {
           first_name: args.first_name,
           last_name: args.last_name,
@@ -231,7 +246,7 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
     async (args: any, extra: any) => {
       if (debug) console.error('[mcp] get_lead_by_url args:', JSON.stringify(args));
       try {
-        const Authorization = resolveAuthHeader(extra);
+        const Authorization = await resolveAuthHeader(extra);
         const payload = {
           url: args.url,
           comments: Boolean(args.comments),
@@ -260,20 +275,22 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
       url: z.string().describe('LinkedIn profile URL to validate (defaults to a public profile)').optional(),
       timeout_ms: z.number().describe('Request timeout in milliseconds').optional(),
     },
-    async (args: any, extra: any) => {
-      if (debug) console.error('[mcp] health args:', JSON.stringify(args));
+    async (args, extra) => {
+      console.error('[mcp] health args:', JSON.stringify(args));
       const started = Date.now();
       const testUrl = typeof args?.url === 'string' && args.url.trim()
         ? args.url
         : 'https://www.linkedin.com/in/satyanadella/';
       try {
-        const Authorization = resolveAuthHeader(extra);
+        const Authorization = await resolveAuthHeader(extra);
+        console.log('[mcp] health auth:', Authorization?.substring(0, 20) + '...');
         const res = await fetchWithTimeout(fetcher, `${apiBase}/api/linkedin/leads/by_link/`, {
           method: 'POST',
           headers: { Authorization, 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: testUrl }),
         }, Number(args?.timeout_ms ?? defaultTimeoutMs));
         const text = await res.text();
+        console.log('res', res.status, text);
         let data: any = undefined;
         try { data = JSON.parse(text); } catch {}
         const ok = !!data?.lead?.linkedin_url;

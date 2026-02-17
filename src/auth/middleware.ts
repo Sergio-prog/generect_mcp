@@ -14,8 +14,10 @@ export async function requireBearerAuth(
   next: NextFunction
 ): Promise<void> {
   const authHeader = req.headers.authorization;
+  console.log('[auth] Authorization header:', authHeader ? `${authHeader.substring(0, 30)}...` : 'MISSING');
   
   if (!authHeader) {
+    console.log('[auth] No authorization header');
     res.status(401)
       .set('WWW-Authenticate', generateWwwAuthenticateHeader())
       .json({
@@ -31,6 +33,7 @@ export async function requireBearerAuth(
   
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
+    console.log('[auth] Invalid Bearer format');
     res.status(401)
       .set('WWW-Authenticate', generateWwwAuthenticateHeader())
       .json({
@@ -45,16 +48,19 @@ export async function requireBearerAuth(
   }
   
   const token = match[1];
+  console.log('[auth] Token type:', token.startsWith('Token ') ? 'Token (direct)' : 'JWT');
   
   if (token.startsWith('Token ')) {
     req.apiToken = token;
     req.isAuthenticated = true;
+    console.log('[auth] Using direct Token auth');
     next();
     return;
   }
   
   const payload = await verifyAccessToken(token);
   if (!payload) {
+    console.log('[auth] JWT verification FAILED');
     res.status(401)
       .set('WWW-Authenticate', generateWwwAuthenticateHeader())
       .json({
@@ -68,13 +74,17 @@ export async function requireBearerAuth(
     return;
   }
   
+  console.log('[auth] JWT verified, sub:', payload.sub, 'gtx length:', payload.gtx?.length);
+  
   try {
     const apiToken = extractApiToken(payload);
+    console.log('[auth] Decrypted API token:', apiToken ? `"${apiToken}"` : 'FAILED');
     req.apiToken = apiToken;
     req.jwtPayload = payload;
     req.isAuthenticated = true;
     next();
   } catch (error) {
+    console.log('[auth] Decryption error:', error);
     res.status(401)
       .set('WWW-Authenticate', generateWwwAuthenticateHeader())
       .json({
