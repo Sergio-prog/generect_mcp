@@ -46,8 +46,6 @@ export async function requireBearerAuth(
   }
   
   const token = match[1];
-  console.log('[auth] Token type:', token.startsWith('Token ') ? 'Token (direct)' : 'JWT');
-  
   if (token.startsWith('Token ')) {
     req.apiToken = token;
     req.isAuthenticated = true;
@@ -74,7 +72,6 @@ export async function requireBearerAuth(
   
   try {
     const apiToken = extractApiToken(payload);
-    console.log('[auth] Decrypted API token:', apiToken ? `"${apiToken}"` : 'FAILED');
     req.apiToken = apiToken;
     req.jwtPayload = payload;
     req.isAuthenticated = true;
