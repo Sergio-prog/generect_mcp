@@ -276,21 +276,19 @@ export function registerTools(server: McpServer, fetcher: Fetcher, apiBase: stri
       timeout_ms: z.number().describe('Request timeout in milliseconds').optional(),
     },
     async (args, extra) => {
-      console.error('[mcp] health args:', JSON.stringify(args));
+      if (debug) console.error('[mcp] health args:', JSON.stringify(args));
       const started = Date.now();
       const testUrl = typeof args?.url === 'string' && args.url.trim()
         ? args.url
         : 'https://www.linkedin.com/in/satyanadella/';
       try {
         const Authorization = await resolveAuthHeader(extra);
-        console.log('[mcp] health auth:', Authorization?.substring(0, 20) + '...');
         const res = await fetchWithTimeout(fetcher, `${apiBase}/api/linkedin/leads/by_link/`, {
           method: 'POST',
           headers: { Authorization, 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: testUrl }),
         }, Number(args?.timeout_ms ?? defaultTimeoutMs));
         const text = await res.text();
-        console.log('res', res.status, text);
         let data: any = undefined;
         try { data = JSON.parse(text); } catch {}
         const ok = !!data?.lead?.linkedin_url;

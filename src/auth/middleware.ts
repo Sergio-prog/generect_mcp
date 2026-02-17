@@ -14,10 +14,8 @@ export async function requireBearerAuth(
   next: NextFunction
 ): Promise<void> {
   const authHeader = req.headers.authorization;
-  console.log('[auth] Authorization header:', authHeader ? `${authHeader.substring(0, 30)}...` : 'MISSING');
   
   if (!authHeader) {
-    console.log('[auth] No authorization header');
     res.status(401)
       .set('WWW-Authenticate', generateWwwAuthenticateHeader())
       .json({
@@ -73,8 +71,6 @@ export async function requireBearerAuth(
       });
     return;
   }
-  
-  console.log('[auth] JWT verified, sub:', payload.sub, 'gtx length:', payload.gtx?.length);
   
   try {
     const apiToken = extractApiToken(payload);
